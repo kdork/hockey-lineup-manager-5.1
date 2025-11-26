@@ -1,0 +1,1488 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hockey Opstelling Manager</title>
+    <!-- SheetJS Library voor Excel export/import -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <!-- jsPDF & html2canvas voor PDF export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background-color: #f0f0f0; }
+        .container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .panel { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        
+        /* Input Table Styles */
+        table { border-collapse: separate; border-spacing: 0; width: 100%; } /* Aangepast voor sticky column */
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        th { background-color: #f2f2f2; }
+        input[type="text"], input[type="number"], select { width: 100%; box-sizing: border-box; }
+        
+        /* Sticky Column Styles */
+        .col-fixed-name {
+            position: sticky;
+            left: 0;
+            z-index: 10;
+            background-color: white;
+            width: 140px;
+            min-width: 140px;
+            box-sizing: border-box;
+        }
+        .col-fixed-jersey {
+            position: sticky;
+            left: 140px;
+            z-index: 10;
+            background-color: white;
+            width: 60px;
+            min-width: 60px;
+            box-sizing: border-box;
+            border-right: 2px solid #999;
+        }
+        th.col-fixed-name, th.col-fixed-jersey {
+            z-index: 20;
+        }
+
+        /* Field Styles */
+        .field-container { position: relative; width: 360px; height: 500px; background-color: #4CAF50; border: 5px solid white; border-radius: 10px; margin: 0 auto; }
+        .goal { display: none; }
+        .circle { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 300px; height: 150px; border: 2px solid white; border-bottom: none; border-radius: 150px 150px 0 0; }
+        
+        .player-marker {
+            position: absolute;
+            width: 80px;
+            height: 40px;
+            background: white;
+            border-radius: 5px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            z-index: 10;
+        }
+        .player-marker.keeper { background: #FFD700; }
+        .player-marker.sub { background: #ddd; }
+        
+        .pos-label { font-size: 9px; color: #666; }
+
+        /* Nieuwe style voor positie nummer */
+        .pos-number-badge {
+            position: absolute;
+            top: -18px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 20px;
+            height: 20px;
+            background-color: #333;
+            color: white;
+            border-radius: 50%;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid white;
+            z-index: 12;
+        }
+        
+        /* Positions (Coordinates based on 400x500 field) */
+        /* 1=LV, 2=RV, 3=LM, 4=MM, 5=RM, 6=LA, 7=RA, K=Keeper */
+        .pos-1 { top: 15%; left: 25%; } /* LV */
+        .pos-2 { top: 15%; left: 75%; } /* RV */
+        .pos-3 { top: 40%; left: 20%; } /* LM */
+        .pos-4 { top: 40%; left: 50%; } /* MM */
+        .pos-5 { top: 40%; left: 80%; } /* RM */
+        .pos-6 { top: 70%; left: 30%; } /* LA */
+        .pos-7 { top: 70%; left: 70%; } /* RA */
+        .pos-K { bottom: 5%; left: 50%; } /* Keeper */
+
+        .bench { margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;}
+        .bench-player { background: #e0e0e0; padding: 5px 10px; border-radius: 4px; font-size: 12px; }
+        .next-pos { font-size: 10px; color: gray; }
+
+        .controls { margin-top: 20px; text-align: center; }
+        button { padding: 10px 20px; cursor: pointer; font-size: 16px; }
+        
+        .weights { display: flex; gap: 15px; margin-bottom: 15px; align-items: center; flex-wrap: wrap; }
+        .weight-input { width: 45px; text-align: center; }
+
+        /* Responsive Styles */
+        .table-scroll {
+            overflow-x: auto;
+            width: 100%;
+            margin-bottom: 10px;
+            -webkit-overflow-scrolling: touch; /* Smooth scrolling op iOS */
+            border: 1px solid #eee;
+        }
+
+        @media (max-width: 960px) {
+            body { padding: 10px; }
+            .container { flex-direction: column; }
+            /* Forceer panelen naar volledige breedte op mobiel en reset flex eigenschappen */
+            .panel { width: 100%; min-width: 0 !important; box-sizing: border-box; flex: none !important; }
+            
+            /* Centreer het veld */
+            .field-container { 
+                margin: 0 auto; 
+            }
+        }
+
+        @media (max-width: 480px) {
+            .weights { gap: 8px; }
+            .weights strong { width: 100%; display: block; margin-bottom: 5px; } /* Aangepast: forceer nieuwe regel */
+            .weights label { font-size: 14px; }
+            h2 { font-size: 1.2em; }
+        }
+        
+        /* Voor hele smalle telefoons, schaal het veld iets omlaag */
+        @media (max-width: 400px) {
+            .panel { padding: 10px; } /* Aangepast: minder padding voor meer ruimte */
+            .field-container {
+                /* Aangepast: Forceer centrering vanuit het midden */
+                position: relative;
+                left: 50%;
+                margin-left: -180px; /* Helft van de 360px breedte terugschuiven */
+                
+                transform: scale(0.85);
+                transform-origin: top center;
+                margin-bottom: -70px; /* Compenseer voor de witruimte door scaling */
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Input Panel -->
+    <div class="panel" style="flex: 1; min-width: 300px;">
+        <h2>Spelers & Voorkeuren</h2>
+        <div style="text-align: left; margin-bottom: 10px;">
+            <a href="Handleiding.pdf" target="_blank" style="color: #666; text-decoration: none; font-size: 16px;">📄 Handleiding</a>
+        </div>
+        <div class="weights">
+            <div style="width: 100%; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; margin-bottom: 5px;">
+                <strong>Weging:</strong>
+                <label>Beste: 
+                    <select id="w1" class="weight-input" style="width: 55px;">
+                        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5" selected>5</option>
+                        <option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option>
+                        <option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option>
+                        <option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option>
+                    </select>
+                </label>
+                <label>Graag: 
+                    <select id="w2" class="weight-input" style="width: 55px;">
+                        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5" selected>5</option>
+                        <option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option>
+                        <option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option>
+                        <option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option>
+                    </select>
+                </label>
+                <label>Coach: 
+                    <select id="w3" class="weight-input" style="width: 55px;">
+                        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5" selected>5</option>
+                        <option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option>
+                        <option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option>
+                        <option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option>
+                    </select>
+                </label>
+            </div>
+            
+            <div style="width: 100%; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; margin-bottom: 5px;">
+                <label><input type="checkbox" id="avoidDoubleBench" checked> Geen dubbele wisselbeurt</label>
+                <label><input type="checkbox" id="minPlaytimeDiff" checked> Minimaal verschil speeltijd</label>
+            </div>
+
+            <div style="width: 100%; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <label>Periodes: 
+                    <select id="numPeriods" class="weight-input" style="width: 55px;">
+                        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                        <option value="6" selected>6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option>
+                        <option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option>
+                        <option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option>
+                        <option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option>
+                        <option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option>
+                    </select>
+                </label>
+                
+                <div style="display:flex; align-items:center; gap:5px;">
+                    <strong>Opstelling:</strong>
+                    <select id="form1" class="weight-input" style="width:45px" title="Verdediging">
+                        <option value="0">0</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                    </select> -
+                    <select id="form2" class="weight-input" style="width:45px" title="Middenveld">
+                        <option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="5">5</option>
+                    </select> -
+                    <select id="form3" class="weight-input" style="width:45px" title="Aanval">
+                        <option value="0">0</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                    </select> -
+                    <select id="form4" class="weight-input" style="width:45px" title="Extra">
+                        <option value="0" selected>0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Nieuwe knoppen voor Excel -->
+        <div style="margin-bottom: 10px;">
+            <button onclick="exportToExcel()" style="background-color: #217346; color: white;">Exporteer Excel</button>
+            <button onclick="document.getElementById('fileInput').click()" style="background-color: #217346; color: white;">Importeer Excel</button>
+            <input type="file" id="fileInput" accept=".xlsx, .xls" style="display: none;" onchange="importFromExcel(this)">
+            <button onclick="exportToPDF()" style="background-color: #D32F2F; color: white;">Exporteer PDF</button>
+        </div>
+
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="col-fixed-name">Naam</th>
+                        <th class="col-fixed-jersey">Rugnr</th>
+                        <th>Aanw</th>
+                        <th>Keeper?</th>
+                        <th>Speelt (x)</th>
+                        <th>Minimaal<br>Periodes</th>
+                        <th>Maximaal<br>Periodes</th>
+                        <th>Positie<br>Helft 1</th>
+                        <th style="width: 1px; white-space: nowrap;">Geen Wissel<br>Helft 1</th>
+                        <th>Positie<br>Helft 2</th>
+                        <th style="width: 1px; white-space: nowrap;">Geen Wissel<br>Helft 2</th>
+                        <th style="min-width: 90px;">Beste<br>(Posities)</th>
+                        <th style="min-width: 90px;">Graag<br>(Posities)</th>
+                        <th style="min-width: 90px;">Coach<br>(Posities)</th>
+                        <th>Strategisch</th>
+                        <th>Niet plek</th>
+                    </tr>
+                </thead>
+                <tbody id="playerTableBody">
+                    <!-- Rows generated by JS -->
+                </tbody>
+            </table>
+        </div>
+        <div style="margin-bottom: 10px;">
+            <button onclick="addPlayerRow('')" style="background-color: #555; color: white; font-size: 14px; padding: 5px 10px;">+ Speler toevoegen</button>
+        </div>
+        <br>
+        <button onclick="calculateLineups()">Bereken Opstellingen</button>
+        
+        <!-- NIEUW: Samenvattingsveld -->
+        <div id="summaryOutput" style="margin-top: 15px; padding: 10px; background: #fff; border: 1px solid #ccc; border-radius: 5px; font-size: 13px; display: none;">
+            <strong>Samenvatting:</strong>
+            <ul id="summaryList" style="padding-left: 20px; margin-top: 5px;"></ul>
+        </div>
+    </div>
+
+    <!-- Field Panel -->
+    <div class="panel" style="flex: 0 0 420px; text-align: center; max-width: 100%;">
+        <h2 id="periodTitle">Periode 1</h2>
+        <div class="field-container" id="hockeyField">
+            <div class="goal"></div>
+            <div class="circle"></div>
+            <!-- Players will be placed here -->
+        </div>
+        
+        <h3>Wisselspelers</h3>
+        <div class="bench" id="benchContainer"></div>
+
+        <div class="controls">
+            <button onclick="prevPeriod()">&lt;</button>
+            <span id="periodIndicator"> 1 / 6 </span>
+            <button onclick="nextPeriod()">&gt;</button>
+            <div style="margin-top: 10px;">
+                <span style="font-size: 12px; color: #666; margin-right: 5px;">Lettertype:</span>
+                <button onclick="adjustFontSize(1)" style="padding: 2px 8px;">&#9650;</button>
+                <button onclick="adjustFontSize(-1)" style="padding: 2px 8px;">&#9660;</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div style="text-align: center; margin-top: 30px; font-size: 12px; color: #666;">
+    Gemaakt door Karel Dormans | <a href="mailto:kareldormans@gmail.com" style="color: #666;">Email</a>
+</div>
+
+<script>
+    // Default names
+    const defaultNames = ["Charlotte", "Nora", "Mila", "Josephine", "Liv", "Emilie", "Emma", "Olivia", "Ayanna", "Maeve", "Julia"];
+    
+    // Dynamic positions mapping
+    let positions = {};
+
+    let playersData = [];
+    let lineups = [];
+    let currentPeriod = 0;
+    let fontSizeModifier = 0;
+    let currentFormationConfig = [];
+
+    function adjustFontSize(delta) {
+        fontSizeModifier += delta;
+        applyFontSize();
+    }
+
+    function applyFontSize() {
+        let styleEl = document.getElementById('dynamic-font-style');
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'dynamic-font-style';
+            document.head.appendChild(styleEl);
+        }
+
+        styleEl.innerHTML = `
+            .player-marker { 
+                font-size: ${12 + fontSizeModifier}px !important; 
+                width: ${80 + (fontSizeModifier * 5)}px !important;
+                height: ${40 + (fontSizeModifier * 2)}px !important;
+            }
+            .pos-label { font-size: ${9 + fontSizeModifier}px !important; }
+            .pos-number-badge { 
+                font-size: ${11 + fontSizeModifier}px !important; 
+                width: ${20 + fontSizeModifier}px !important; 
+                height: ${20 + fontSizeModifier}px !important;
+            }
+            .bench-player { font-size: ${12 + fontSizeModifier}px !important; }
+            .next-pos { font-size: ${10 + fontSizeModifier}px !important; }
+        `;
+    }
+
+    function init() {
+        applyFontSize();
+        // Check if table is already populated (e.g. after import), if so, don't overwrite with defaults
+        const tbody = document.getElementById('playerTableBody');
+        if (tbody.children.length > 0) return;
+
+        defaultNames.forEach((name, index) => {
+            addPlayerRow(name);
+        });
+    }
+
+    // Helper function to create a row (used by init and import)
+    function addPlayerRow(name, data = {}) {
+        const tbody = document.getElementById('playerTableBody');
+        const tr = document.createElement('tr');
+        
+        // Auto-increment jersey number if not provided
+        const nextJerseyNum = tbody.children.length + 1;
+        const jerseyNum = data.jerseyNum !== undefined ? data.jerseyNum : nextJerseyNum;
+        
+        // Helper to safely get value
+        const val = (key, def = "") => data[key] !== undefined ? data[key] : def;
+        const chk = (key) => data[key] === true || data[key] === "TRUE" || data[key] === true ? "checked" : "";
+
+        // Default active is true unless specified otherwise
+        const activeChecked = data.active !== undefined ? (data.active ? "checked" : "") : "checked";
+
+        // Helper voor dropdown opties (scrollwheel op mobiel)
+        const createOpts = (max, selected, start = 0) => {
+            let opts = `<option value="" ${selected === "" || selected === undefined ? "selected" : ""}></option>`;
+            for(let i=start; i<=max; i++) {
+                opts += `<option value="${i}" ${selected == i ? "selected" : ""}>${i}</option>`;
+            }
+            return opts;
+        };
+
+        tr.innerHTML = `
+            <td class="col-fixed-name"><input type="text" value="${name}" class="p-name" style="min-width: 110px;"></td>
+            <td class="col-fixed-jersey"><input type="text" value="${jerseyNum}" class="p-jersey" style="width: 40px;"></td>
+            <td><input type="checkbox" class="p-active" ${activeChecked}></td>
+            <td><input type="checkbox" class="p-keeper" ${chk('keeper')}></td>
+            <td><span class="p-played-count" style="font-weight:bold; color:blue;">-</span></td>
+            <td><select class="p-min-periods" style="width: 50px;">${createOpts(30, val('minP'), 0)}</select></td>
+            <td><select class="p-max-periods" style="width: 50px;">${createOpts(30, val('maxP'), 0)}</select></td>
+            <td><select class="p-fixed-h1" style="width: 50px;">${createOpts(11, val('fixedH1'), 1)}</select></td>
+            <td><input type="checkbox" class="p-gw-h1" ${chk('gwH1')}></td>
+            <td><select class="p-fixed-h2" style="width: 50px;">${createOpts(11, val('fixedH2'), 1)}</select></td>
+            <td><input type="checkbox" class="p-gw-h2" ${chk('gwH2')}></td>
+            <td><input type="text" value="${val('best')}" placeholder="bv. 3,2,5" class="p-best" style="width: 100%;"></td>
+            <td><input type="text" value="${val('like')}" placeholder="bv. 1,4,7" class="p-like" style="width: 100%;"></td>
+            <td><input type="text" value="${val('coach')}" placeholder="bv. 6,7,4" class="p-coach" style="width: 100%;"></td>
+            <td><input type="text" value="${val('strategic')}" placeholder="+/-" class="p-strategic" style="width: 80px;"></td>
+            <td><input type="text" value="${val('notPos')}" placeholder="bv. 1, 8" class="p-not-pos" style="width: 80px;"></td>
+        `;
+        tbody.appendChild(tr);
+
+        // Logic for styling and single keeper
+        const nameInput = tr.querySelector('.p-name');
+        const activeCb = tr.querySelector('.p-active');
+        const keeperCb = tr.querySelector('.p-keeper');
+
+        const updateStyle = () => {
+            nameInput.style.backgroundColor = '';
+            nameInput.style.color = '';
+            nameInput.style.fontWeight = 'normal'; // Ensure text doesn't get bold/thick
+            
+            if (keeperCb.checked) {
+                nameInput.style.backgroundColor = '#FFD700'; // Yellow/Gold
+                nameInput.style.color = 'black';
+            } else if (activeCb.checked) {
+                nameInput.style.backgroundColor = '#dcedc8'; // Light Green
+            }
+        };
+
+        activeCb.addEventListener('change', function() {
+            // Als aanwezigheid wordt uitgezet, en speler was keeper, zet keeper uit
+            if (!this.checked && keeperCb.checked) {
+                keeperCb.checked = false;
+            }
+            updateStyle();
+        });
+        
+        keeperCb.addEventListener('change', function() {
+            if (this.checked) {
+                // Als keeper wordt aangezet, zet aanwezigheid aan
+                if (!activeCb.checked) {
+                    activeCb.checked = true;
+                }
+
+                // Uncheck other keepers
+                const allKeepers = document.querySelectorAll('.p-keeper');
+                allKeepers.forEach(k => {
+                    if (k !== this && k.checked) {
+                        k.checked = false;
+                        // Update style of the other row
+                        const otherRow = k.closest('tr');
+                        const otherName = otherRow.querySelector('.p-name');
+                        const otherActive = otherRow.querySelector('.p-active');
+                        
+                        otherName.style.backgroundColor = '';
+                        otherName.style.color = '';
+                        otherName.style.fontWeight = 'normal';
+                        if (otherActive.checked) otherName.style.backgroundColor = '#dcedc8';
+                    }
+                });
+            }
+            updateStyle();
+        });
+
+        // Initial style application
+        updateStyle();
+    }
+
+    function exportToExcel() {
+        const rows = document.querySelectorAll('#playerTableBody tr');
+        const data = [];
+
+        rows.forEach(row => {
+            data.push({
+                "Actief": row.querySelector('.p-active').checked,
+                "Rugnr": row.querySelector('.p-jersey').value,
+                "Naam": row.querySelector('.p-name').value,
+                "Keeper": row.querySelector('.p-keeper').checked,
+                "Pos H1": row.querySelector('.p-fixed-h1').value,
+                "GW H1": row.querySelector('.p-gw-h1').checked,
+                "Pos H2": row.querySelector('.p-fixed-h2').value,
+                "GW H2": row.querySelector('.p-gw-h2').checked,
+                "Min Per": row.querySelector('.p-min-periods').value,
+                "Max Per": row.querySelector('.p-max-periods').value,
+                "Beste": row.querySelector('.p-best').value,
+                "Graag": row.querySelector('.p-like').value,
+                "Coach": row.querySelector('.p-coach').value,
+                "Strategisch": row.querySelector('.p-strategic').value,
+                "Niet plek": row.querySelector('.p-not-pos').value
+            });
+        });
+
+        // Settings sheet
+        const settingsData = [{
+            "WegingBeste": document.getElementById('w1').value,
+            "WegingGraag": document.getElementById('w2').value,
+            "WegingCoach": document.getElementById('w3').value,
+            "GeenDubbeleWissel": document.getElementById('avoidDoubleBench').checked,
+            "MinimaalVerschilSpeeltijd": document.getElementById('minPlaytimeDiff').checked,
+            "AantalPeriodes": document.getElementById('numPeriods').value,
+            "Opstelling1": document.getElementById('form1').value,
+            "Opstelling2": document.getElementById('form2').value,
+            "Opstelling3": document.getElementById('form3').value,
+            "Opstelling4": document.getElementById('form4').value
+        }];
+
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wsSettings = XLSX.utils.json_to_sheet(settingsData);
+        
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Spelers");
+        XLSX.utils.book_append_sheet(wb, wsSettings, "Instellingen");
+        XLSX.writeFile(wb, "HockeyOpstelling.xlsx");
+    }
+
+    function importFromExcel(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            
+            // Import Players
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+
+            // Clear current table
+            const tbody = document.getElementById('playerTableBody');
+            tbody.innerHTML = '';
+
+            jsonData.forEach(row => {
+                // Map Excel columns back to internal data structure
+                const mappedData = {
+                    active: row["Actief"],
+                    jerseyNum: row["Rugnr"],
+                    keeper: row["Keeper"],
+                    strategic: row["Strategisch"],
+                    notPos: row["Niet plek"],
+                    best: row["Beste"],
+                    like: row["Graag"],
+                    coach: row["Coach"],
+                    fixedH1: row["Pos H1"],
+                    gwH1: row["GW H1"],
+                    fixedH2: row["Pos H2"],
+                    gwH2: row["GW H2"],
+                    minP: row["Min Per"],
+                    maxP: row["Max Per"]
+                };
+                addPlayerRow(row["Naam"], mappedData);
+            });
+
+            // Import Settings if available
+            if (workbook.SheetNames.length > 1) {
+                const settingsSheet = workbook.Sheets[workbook.SheetNames[1]];
+                const settingsJson = XLSX.utils.sheet_to_json(settingsSheet);
+                if (settingsJson.length > 0) {
+                    const s = settingsJson[0];
+                    if(s["WegingBeste"]) document.getElementById('w1').value = s["WegingBeste"];
+                    if(s["WegingGraag"]) document.getElementById('w2').value = s["WegingGraag"];
+                    if(s["WegingCoach"]) document.getElementById('w3').value = s["WegingCoach"];
+                    if(s["GeenDubbeleWissel"] !== undefined) document.getElementById('avoidDoubleBench').checked = s["GeenDubbeleWissel"];
+                    if(s["MinimaalVerschilSpeeltijd"] !== undefined) document.getElementById('minPlaytimeDiff').checked = s["MinimaalVerschilSpeeltijd"];
+                    if(s["AantalPeriodes"]) document.getElementById('numPeriods').value = s["AantalPeriodes"];
+                    if(s["Opstelling1"] !== undefined) document.getElementById('form1').value = s["Opstelling1"];
+                    if(s["Opstelling2"] !== undefined) document.getElementById('form2').value = s["Opstelling2"];
+                    if(s["Opstelling3"] !== undefined) document.getElementById('form3').value = s["Opstelling3"];
+                    if(s["Opstelling4"] !== undefined) document.getElementById('form4').value = s["Opstelling4"];
+                }
+            }
+            
+            // Reset input so same file can be selected again if needed
+            input.value = '';
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    async function exportToPDF() {
+        if (lineups.length === 0) {
+            alert("Bereken eerst de opstellingen.");
+            return;
+        }
+
+        const { jsPDF } = window.jspdf;
+        const totalPeriods = lineups.length;
+        const halfPeriods = Math.ceil(totalPeriods / 2);
+        
+        // Maak een tijdelijke container voor de grid layout
+        const container = document.createElement('div');
+        container.id = 'pdf-export-root';
+        container.style.position = 'absolute';
+        container.style.top = '0';
+        container.style.left = '0';
+        // Zorg dat de container niet zichtbaar is voor de gebruiker, maar wel gerenderd kan worden
+        container.style.zIndex = '-1000'; 
+        
+        // Breedte instellen: aantal kolommen * breedte per kolom + wat marge
+        const colWidth = 400;
+        const totalWidth = (halfPeriods * colWidth);
+        container.style.width = totalWidth + 'px'; 
+        
+        container.style.backgroundColor = '#ffffff'; // Wit achtergrond voor PDF
+        container.style.display = 'grid';
+        container.style.gridTemplateColumns = `repeat(${halfPeriods}, 1fr)`;
+        container.style.gap = '0px'; // Geen gap, we regelen spacing in de elementen
+        container.style.padding = '20px';
+        
+        // Voeg alle periodes toe
+        for(let i=0; i<totalPeriods; i++) {
+            const el = createPeriodElement(i);
+            if(el) container.appendChild(el);
+        }
+
+        document.body.appendChild(container);
+
+        try {
+            // Wacht heel even zodat DOM volledig gerenderd is
+            await new Promise(r => setTimeout(r, 100));
+
+            // Scroll naar boven om rendering issues te voorkomen
+            window.scrollTo(0,0);
+
+            const canvas = await html2canvas(container, {
+                scale: 2, // Hogere kwaliteit
+                useCORS: true,
+                logging: false,
+                // BELANGRIJK: Forceer desktop afmetingen zodat mobiele CSS (scaling/margins) niet wordt toegepast
+                windowWidth: 1920,
+                windowHeight: 1080,
+                width: totalWidth + 40, // + padding
+                height: container.offsetHeight
+            });
+            
+            const imgData = canvas.toDataURL('image/jpeg', 0.9);
+            const pdf = new jsPDF('l', 'mm', 'a4'); // Landscape A4
+            
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
+            
+            // Bereken optimale schaal om pagina te vullen
+            const imgProps = pdf.getImageProperties(imgData);
+            const ratio = imgProps.width / imgProps.height;
+            
+            let w = pdfWidth - 10; // 5mm marge
+            let h = w / ratio;
+            
+            if (h > (pdfHeight - 10)) {
+                h = pdfHeight - 10;
+                w = h * ratio;
+            }
+            
+            const x = (pdfWidth - w) / 2;
+            const y = (pdfHeight - h) / 2;
+            
+            pdf.addImage(imgData, 'JPEG', x, y, w, h);
+            pdf.save('HockeyOpstellingen.pdf');
+            
+        } catch (err) {
+            console.error(err);
+            alert("Fout bij genereren PDF: " + err.message);
+        } finally {
+            document.body.removeChild(container);
+        }
+    }
+
+    function createPeriodElement(periodIndex) {
+        const data = lineups[periodIndex];
+        if (!data) return null;
+
+        const wrapper = document.createElement('div');
+        wrapper.style.textAlign = 'center';
+        wrapper.style.marginBottom = '20px';
+        wrapper.style.width = '100%'; // Vul de grid cel
+        
+        const title = document.createElement('h3');
+        title.innerText = `Periode ${data.period}`;
+        title.style.margin = "0 0 5px 0";
+        title.style.fontSize = "16px";
+        title.style.fontFamily = "sans-serif";
+        wrapper.appendChild(title);
+
+        // Clone field container structure
+        const fieldContainer = document.createElement('div');
+        fieldContainer.className = 'field-container';
+        // Reset specifieke mobiele styles inline voor zekerheid, hoewel windowWidth dit ook zou moeten doen
+        fieldContainer.style.margin = "0 auto"; 
+        fieldContainer.style.transform = "none";
+        fieldContainer.style.left = "auto";
+        fieldContainer.style.marginLeft = "auto";
+        fieldContainer.style.position = "relative";
+        
+        // Add static elements
+        const goal = document.createElement('div'); goal.className = 'goal';
+        const circle = document.createElement('div'); circle.className = 'circle';
+        fieldContainer.appendChild(goal);
+        fieldContainer.appendChild(circle);
+
+        // Add players
+        if (data.keeper) {
+            addMarker(fieldContainer, 'K', data.keeper.name, 'Keeper', true);
+        }
+        
+        // Use dynamic coordinates
+        const formation = getFormationConfig();
+        const totalFieldPlayers = formation.reduce((sum, row) => sum + row.count, 0);
+        
+        for (let pos = 1; pos <= totalFieldPlayers; pos++) {
+            const player = data.field[pos];
+            if (player) {
+                const coords = getPosCoordinates(pos, formation);
+                addMarker(fieldContainer, pos, player.name, coords.role, false, coords);
+            }
+        }
+        wrapper.appendChild(fieldContainer);
+
+        // Bench
+        const benchDiv = document.createElement('div');
+        benchDiv.className = 'bench';
+        // Minder marge aan de bovenkant om ze dichter bij het veld te trekken
+        benchDiv.style.marginTop = '5px'; 
+        benchDiv.style.gap = '5px';
+        benchDiv.style.justifyContent = 'center';
+        
+        const nextData = lineups[periodIndex + 1];
+        data.bench.forEach(pl => {
+            let nextPosText = "";
+            if (nextData) {
+                const nextPosEntry = Object.entries(nextData.field).find(([k, v]) => v.id === pl.id);
+                if (nextPosEntry) {
+                    nextPosText = `-> ${positions[nextPosEntry[0]]}`;
+                } else {
+                    nextPosText = "-> Wissel";
+                }
+            }
+            const pDiv = document.createElement('div');
+            pDiv.className = 'bench-player';
+            pDiv.style.padding = "4px 8px";
+            pDiv.style.fontSize = "11px";
+            pDiv.style.backgroundColor = "#e0e0e0";
+            pDiv.style.borderRadius = "4px";
+            pDiv.innerHTML = `<strong>${pl.name}</strong><br><span class="next-pos" style="font-size:10px">${nextPosText}</span>`;
+            benchDiv.appendChild(pDiv);
+        });
+        wrapper.appendChild(benchDiv);
+
+        return wrapper;
+    }
+
+    function parsePreferences(str) {
+        if (!str) return [];
+        return str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    }
+
+    function parseStringList(str) {
+        if (!str) return [];
+        return str.split(',').map(s => s.trim()).filter(s => s !== "");
+    }
+
+    function getScore(playerId, posId, bestPref, likePref, coachPref, w1, w2, w3) {
+        // Lower index in preference array = better score.
+        // We invert this: index 0 = score 10, index 1 = score 9, etc.
+        // If pos not in list, score 0.
+        
+        const calc = (list, pId) => {
+            const idx = list.indexOf(pId);
+            // Aangepast: Basiswaarde verhoogd van 10 naar 20.
+            // Hierdoor werken langere lijsten (bv. voor 11-tallen) correct zonder dat de score negatief wordt aan het einde van de lijst.
+            // Index 0 (1e keus) = 20 punten. Index 10 (11e keus) = 10 punten.
+            // Niet in lijst = 1 punt.
+            return idx === -1 ? 1 : (20 - idx); 
+        };
+
+        const s1 = calc(bestPref, posId) * w1;
+        const s2 = calc(likePref, posId) * w2;
+        const s3 = calc(coachPref, posId) * w3;
+        
+        return s1 + s2 + s3;
+    }
+
+    function getDistance(pos1, pos2, formation) {
+        const c1 = getPosCoordinates(pos1, formation);
+        const c2 = getPosCoordinates(pos2, formation);
+        const x1 = parseFloat(c1.left);
+        const y1 = parseFloat(c1.top);
+        const x2 = parseFloat(c2.left);
+        const y2 = parseFloat(c2.top);
+        return Math.sqrt(Math.pow(x2-x1, 2) + Math.pow(y2-y1, 2));
+    }
+
+    function getFormationConfig() {
+        const f1 = parseInt(document.getElementById('form1').value) || 0; // Def
+        const f2 = parseInt(document.getElementById('form2').value) || 0; // Mid
+        const f3 = parseInt(document.getElementById('form3').value) || 0; // Att
+        const f4 = parseInt(document.getElementById('form4').value) || 0; // Extra (Top)
+
+        // Visual rows from Top to Bottom
+        // Assuming inputs are Def - Mid - Att - Extra(High)
+        // So visual: Extra, Att, Mid, Def
+        const rows = [];
+        if (f4 > 0) rows.push({ count: f4, name: "Spits" });
+        if (f3 > 0) rows.push({ count: f3, name: "Aanval" });
+        if (f2 > 0) rows.push({ count: f2, name: "Midden" });
+        if (f1 > 0) rows.push({ count: f1, name: "Verdediging" });
+
+        return rows;
+    }
+
+    function getPosCoordinates(posId, formationRows) {
+        let currentId = 1;
+        const totalRows = formationRows.length;
+        
+        for (let r = 0; r < totalRows; r++) {
+            const row = formationRows[r];
+            const count = row.count;
+            
+            // Check if posId is in this row
+            if (posId >= currentId && posId < currentId + count) {
+                const colIndex = posId - currentId;
+                
+                // Y Coordinate: Distribute rows between 15% and 75%
+                let top = 45; 
+                if (totalRows > 1) {
+                    top = 15 + (r * (60 / (totalRows - 1)));
+                }
+                
+                // X Coordinate: Distribute evenly
+                const left = (colIndex + 1) * (100 / (count + 1));
+                
+                // Determine specific role name
+                let roleName = row.name;
+                let suffix = row.name;
+                
+                if (row.name === "Verdediging") suffix = "Achter";
+                else if (row.name === "Midden") suffix = "Midden";
+                else if (row.name === "Aanval") suffix = "Voor";
+                else if (row.name === "Spits") suffix = "Spits";
+
+                if (count === 1) {
+                    if (suffix === "Spits") roleName = "Spits";
+                    else roleName = "Centraal " + suffix;
+                } else if (count === 2) {
+                    if (colIndex === 0) roleName = "Links " + suffix;
+                    else roleName = "Rechts " + suffix;
+                } else if (count === 3) {
+                    if (colIndex === 0) roleName = "Links " + suffix;
+                    else if (colIndex === 1) roleName = "Midden " + suffix;
+                    else roleName = "Rechts " + suffix;
+                } else if (count === 4) {
+                    if (colIndex === 0) roleName = "Links " + suffix;
+                    else if (colIndex === 1) roleName = "Links-Mid " + suffix;
+                    else if (colIndex === 2) roleName = "Rechts-Mid " + suffix;
+                    else roleName = "Rechts " + suffix;
+                } else if (count === 5) {
+                    if (colIndex === 0) roleName = "Links " + suffix;
+                    else if (colIndex === 1) roleName = "Links-Mid " + suffix;
+                    else if (colIndex === 2) roleName = "Midden " + suffix;
+                    else if (colIndex === 3) roleName = "Rechts-Mid " + suffix;
+                    else roleName = "Rechts " + suffix;
+                } else {
+                    roleName = suffix + " " + (colIndex + 1);
+                }
+                
+                return { top: top + '%', left: left + '%', role: roleName };
+            }
+            currentId += count;
+        }
+        return { top: '50%', left: '50%', role: 'Reserve' };
+    }
+
+    function calculateLineups() {
+        // 1. Gather Data
+        const rows = document.querySelectorAll('#playerTableBody tr');
+        const w1 = parseFloat(document.getElementById('w1').value) || 1;
+        const w2 = parseFloat(document.getElementById('w2').value) || 1;
+        const w3 = parseFloat(document.getElementById('w3').value) || 1;
+        const avoidDoubleBench = document.getElementById('avoidDoubleBench').checked;
+        const minPlaytimeDiff = document.getElementById('minPlaytimeDiff').checked;
+        const numPeriods = parseInt(document.getElementById('numPeriods').value) || 6;
+
+        // Determine formation
+        currentFormationConfig = getFormationConfig();
+        const totalFieldPlayers = currentFormationConfig.reduce((sum, row) => sum + row.count, 0);
+        
+        // Update global positions map for labels
+        positions = {};
+        for(let i=1; i<=totalFieldPlayers; i++) {
+            const coords = getPosCoordinates(i, currentFormationConfig);
+            positions[i] = coords.role;
+        }
+        positions[8] = "Keeper"; // Keep keeper ID 8 for now, or handle separately
+
+        let activePlayers = [];
+        let keeper = null;
+
+        rows.forEach((row, idx) => {
+            const isActive = row.querySelector('.p-active').checked;
+            if (!isActive) return;
+
+            const name = row.querySelector('.p-name').value;
+            // Als naam leeg is, sla over
+            if (!name.trim()) return;
+
+            const jerseyNum = row.querySelector('.p-jersey').value.trim();
+            
+            // NIEUWE LOGICA: Parse Strategisch veld voor zowel vrienden als vijanden
+            const rawStrategic = row.querySelector('.p-strategic').value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+            
+            // Positieve getallen zijn strategische partners
+            const strategic = rawStrategic.filter(n => n > 0);
+            
+            // Negatieve getallen zijn incompatibel (sla op als positief rugnummer voor vergelijking)
+            const incompatible = rawStrategic.filter(n => n < 0).map(n => Math.abs(n));
+
+            const isKeeper = row.querySelector('.p-keeper').checked;
+            
+            // Nieuwe velden uitlezen
+            const minPeriods = row.querySelector('.p-min-periods').value;
+            const minP = minPeriods === "" ? 0 : parseInt(minPeriods);
+
+            const maxPeriods = row.querySelector('.p-max-periods').value;
+            const maxP = maxPeriods === "" ? numPeriods : parseInt(maxPeriods); // Default max is totaal aantal periodes
+
+            const fixedH1 = parseInt(row.querySelector('.p-fixed-h1').value) || null;
+            const fixedH2 = parseInt(row.querySelector('.p-fixed-h2').value) || null;
+            const gwH1 = row.querySelector('.p-gw-h1').checked;
+            const gwH2 = row.querySelector('.p-gw-h2').checked;
+
+            const best = parsePreferences(row.querySelector('.p-best').value);
+            const like = parsePreferences(row.querySelector('.p-like').value);
+            const coach = parsePreferences(row.querySelector('.p-coach').value);
+            const notPos = parsePreferences(row.querySelector('.p-not-pos').value);
+
+            const pObj = { 
+                id: idx, 
+                name, 
+                jerseyNum, // String
+                jerseyNumInt: parseInt(jerseyNum), // Int for comparison
+                strategic, // Array of ints
+                incompatible, // Array of ints
+                notPos, // Array of ints (forbidden positions)
+                best, 
+                like, 
+                coach, 
+                fixedH1, 
+                fixedH2, 
+                gwH1, 
+                gwH2, 
+                minP,
+                maxP, 
+                played: 0, 
+                isKeeper,
+                rowElement: row 
+            };
+            
+            if (isKeeper) keeper = pObj;
+            else activePlayers.push(pObj);
+        });
+
+        if (!keeper && activePlayers.length > 0) {
+            alert("Selecteer aub een keeper!");
+            return;
+        }
+
+        // 2. Generate Periods
+        lineups = [];
+        const halfTimePeriod = Math.floor(numPeriods / 2);
+        
+        for (let p = 0; p < numPeriods; p++) {
+            const isHalf1 = p < halfTimePeriod;
+            const prevBenchIds = (p > 0 && lineups[p-1]) ? lineups[p-1].bench.map(pl => pl.id) : [];
+            const remainingPeriods = numPeriods - p; // Aantal periodes inclusief deze die nog komen
+
+            // Sortering voor selectie van veldspelers
+            activePlayers.sort((a, b) => {
+                // STAP 0: Check Max Periods (Harde limiet - mag niet meer spelen)
+                const aDone = a.played >= a.maxP;
+                const bDone = b.played >= b.maxP;
+
+                if (aDone && !bDone) return 1; // A naar onder
+                if (!aDone && bDone) return -1; // B naar onder
+                if (aDone && bDone) return 0;
+
+                // NIEUW: Als Minimaal Verschil Speeltijd AAN staat, is aantal gespeelde periodes leidend.
+                // Dit verplaatsen we naar boven, VOOR 'Geen Wissel' en 'Min Periods Urgency'.
+                // Hierdoor wordt eerlijke verdeling de hoogste prioriteit (na max periods).
+                if (minPlaytimeDiff) {
+                    if (a.played !== b.played) return a.played - b.played;
+                }
+
+                // STAP 0.5: Check Min Periods Urgency (MOET nu spelen om target te halen)
+                // Alleen relevant als we niet al op speeltijd sorteren (want dan regelt dat het wel)
+                if (!minPlaytimeDiff) {
+                    const aMustPlay = (a.minP - a.played) >= remainingPeriods;
+                    const bMustPlay = (b.minP - b.played) >= remainingPeriods;
+                    
+                    if (aMustPlay && !bMustPlay) return -1; // A voorrang
+                    if (!aMustPlay && bMustPlay) return 1;
+                }
+
+                // STAP 1: Check "Geen Wissel" (GW) status
+                const aNoSub = isHalf1 ? a.gwH1 : a.gwH2;
+                const bNoSub = isHalf1 ? b.gwH1 : b.gwH2;
+
+                if (aNoSub && !bNoSub) return -1;
+                if (!aNoSub && bNoSub) return 1;
+
+                // STAP 1.5: Check Avoid Double Bench
+                if (avoidDoubleBench && p > 0) {
+                    const aWasBench = prevBenchIds.includes(a.id);
+                    const bWasBench = prevBenchIds.includes(b.id);
+                    
+                    if (aWasBench && !bWasBench) return -1; // A zat wissel, dus mag nu spelen (komt bovenaan)
+                    if (!aWasBench && bWasBench) return 1;
+                }
+
+                // STAP 2: Check Min Periods (Heeft nog minuten nodig, maar niet urgent)
+                // Alleen als Minimaal Verschil Speeltijd uit staat
+                if (!minPlaytimeDiff) {
+                    const aRem = Math.max(0, a.minP - a.played);
+                    const bRem = Math.max(0, b.minP - b.played);
+                    if (aRem !== bRem) return bRem - aRem; // Degene die nog het meeste moet, krijgt voorrang
+                }
+
+                // STAP 3: Normale rotatie
+                if (a.played !== b.played) return a.played - b.played;
+                
+                return 0.5 - Math.random();
+            });
+            
+            // Take players for the field based on formation count
+            const fieldPlayers = activePlayers.slice(0, totalFieldPlayers);
+            const benchPlayers = activePlayers.slice(totalFieldPlayers);
+
+            // --- INCOMPATIBILITY CHECK & SWAP ---
+            // Check if incompatible players are on the field together. If so, try to swap one to bench.
+            let conflictFound = true;
+            let attempts = 0;
+            while(conflictFound && attempts < 10) {
+                conflictFound = false;
+                attempts++;
+                
+                for (let i = 0; i < fieldPlayers.length; i++) {
+                    const p1 = fieldPlayers[i];
+                    if (!p1.incompatible || p1.incompatible.length === 0) continue;
+                    
+                    for (let j = i + 1; j < fieldPlayers.length; j++) {
+                        const p2 = fieldPlayers[j];
+                        // Check both ways using integer comparison
+                        const conflict = p1.incompatible.includes(p2.jerseyNumInt) || (p2.incompatible && p2.incompatible.includes(p1.jerseyNumInt));
+                        
+                        if (conflict) {
+                            // Try to swap p2 with a bench player
+                            const p2Fixed = isHalf1 ? p2.gwH1 : p2.gwH2;
+                            // Check urgency for p2: Als ze MOETEN spelen, mag je ze niet wisselen voor een conflict
+                            // Als minPlaytimeDiff aan staat, negeren we minP urgency (want we balanceren puur op aantal),
+                            // maar we moeten wel zorgen dat we niet wisselen met iemand die al meer gespeeld heeft.
+                            const p2MustPlay = !minPlaytimeDiff && ((p2.minP - p2.played) >= remainingPeriods);
+                            
+                            if (!p2Fixed && !p2MustPlay) {
+                                const swapIdx = benchPlayers.findIndex(b => {
+                                    // Check if b is compatible with p1
+                                    const bConf = p1.incompatible.includes(b.jerseyNumInt) || (b.incompatible && b.incompatible.includes(p1.jerseyNumInt));
+                                    // Check if b is allowed to play
+                                    const bDone = b.played >= b.maxP;
+                                    
+                                    // NIEUW: Als Minimaal Verschil Speeltijd aan staat, mag de wisselspeler niet meer gespeeld hebben dan de speler op het veld.
+                                    // Anders vergroten we het gat in speeltijd.
+                                    let playtimeCheck = true;
+                                    if (minPlaytimeDiff) {
+                                        if (b.played > p2.played) playtimeCheck = false;
+                                    }
+
+                                    return !bConf && !bDone && playtimeCheck; 
+                                });
+                                
+                                if (swapIdx !== -1) {
+                                    const b = benchPlayers[swapIdx];
+                                    benchPlayers[swapIdx] = p2;
+                                    fieldPlayers[j] = b;
+                                    conflictFound = true; // Restart scan
+                                    break; 
+                                }
+                            }
+                        }
+                    }
+                    if (conflictFound) break;
+                }
+            }
+            // ------------------------------------
+
+            // Increment played count
+            fieldPlayers.forEach(pl => pl.played++);
+
+            let fieldSetup = {}; 
+            let availablePos = [];
+            for(let i=1; i<=totalFieldPlayers; i++) availablePos.push(i);
+            
+            let unassignedPlayers = [];
+
+            // STAP A: Check vaste posities (Fixed Positions)
+            [...fieldPlayers].forEach(pl => {
+                const fixedPos = isHalf1 ? pl.fixedH1 : pl.fixedH2;
+                
+                if (fixedPos && availablePos.includes(fixedPos)) {
+                    fieldSetup[fixedPos] = pl;
+                    availablePos = availablePos.filter(x => x !== fixedPos);
+                } else {
+                    unassignedPlayers.push(pl);
+                }
+            });
+
+            // STAP B: Positiebehoud (Stability check)
+            // Reset stability na de helft
+            if (p > 0 && p !== halfTimePeriod) {
+                const prevField = lineups[p - 1].field;
+                let stillUnassigned = [];
+
+                unassignedPlayers.forEach(pl => {
+                    const prevPosEntry = Object.entries(prevField).find(([pos, player]) => player.id === pl.id);
+                    
+                    if (prevPosEntry) {
+                        const prevPos = parseInt(prevPosEntry[0]);
+                        if (availablePos.includes(prevPos)) {
+                            fieldSetup[prevPos] = pl;
+                            availablePos = availablePos.filter(x => x !== prevPos);
+                        } else {
+                            stillUnassigned.push(pl);
+                        }
+                    } else {
+                        stillUnassigned.push(pl);
+                    }
+                });
+                unassignedPlayers = stillUnassigned;
+            }
+
+            // STAP C: Optimalisatie
+            while (availablePos.length > 0 && unassignedPlayers.length > 0) {
+                let bestMatch = { score: -9999, pIdx: -1, pos: -1 };
+
+                unassignedPlayers.forEach((pl, pIdx) => {
+                    availablePos.forEach(pos => {
+                        // HARD CONSTRAINT: Check "Niet plek"
+                        if (pl.notPos && pl.notPos.includes(pos)) {
+                            return; // Sla deze positie over voor deze speler
+                        }
+
+                        let score = getScore(pl.id, pos, pl.best, pl.like, pl.coach, w1, w2, w3);
+                        
+                        // --- STRATEGIC & INCOMPATIBLE LOGIC ---
+                        for (const [assignedPos, assignedPl] of Object.entries(fieldSetup)) {
+                            const assignedPosInt = parseInt(assignedPos);
+                            const assignedJersey = assignedPl.jerseyNumInt;
+
+                            // 1. Strategic Bonus (Positive numbers)
+                            if (pl.strategic && pl.strategic.length > 0) {
+                                if (pl.strategic.includes(assignedJersey) || (assignedPl.strategic && assignedPl.strategic.includes(pl.jerseyNumInt))) {
+                                    const dist = getDistance(pos, assignedPosInt, currentFormationConfig);
+                                    if (dist < 35) score += 5; 
+                                    if (dist < 20) score += 5; 
+                                }
+                            }
+
+                            // 2. Incompatible Penalty (Negative numbers)
+                            if (pl.incompatible && pl.incompatible.length > 0) {
+                                if (pl.incompatible.includes(assignedJersey) || (assignedPl.incompatible && assignedPl.incompatible.includes(pl.jerseyNumInt))) {
+                                    const dist = getDistance(pos, assignedPosInt, currentFormationConfig);
+                                    
+                                    // Basis straf omdat ze samen op het veld staan (voorkeur niet samen)
+                                    score -= 10;
+
+                                    // Zware straf als ze dicht bij elkaar staan (afstand < 40)
+                                    // Dit voorkomt zelfde linie of verticaal aangrenzend
+                                    if (dist < 40) {
+                                        score -= 100; 
+                                    }
+                                }
+                            }
+                        }
+                        // -----------------------
+
+                        if (score > bestMatch.score) {
+                            bestMatch = { score, pIdx, pos };
+                        }
+                    });
+                });
+
+                if (bestMatch.pos !== -1) {
+                    const player = unassignedPlayers[bestMatch.pIdx];
+                    fieldSetup[bestMatch.pos] = player;
+                    unassignedPlayers.splice(bestMatch.pIdx, 1);
+                    availablePos = availablePos.filter(pos => pos !== bestMatch.pos);
+                } else {
+                    // NOODGREEP: Geen match gevonden door restricties (bv. "Niet plek").
+                    // Om een infinite loop te voorkomen, wijzen we de eerste speler toe aan de eerste vrije plek.
+                    // Dit negeert de "Niet plek" regel als het echt niet anders kan.
+                    const player = unassignedPlayers[0];
+                    const pos = availablePos[0];
+                    
+                    fieldSetup[pos] = player;
+                    unassignedPlayers.splice(0, 1);
+                    availablePos.shift(); // Verwijder eerste positie uit array
+                }
+            }
+
+            lineups.push({
+                period: p + 1,
+                field: fieldSetup,
+                keeper: keeper,
+                bench: benchPlayers
+            });
+        }
+
+        // Update UI Counts
+        activePlayers.forEach(pl => {
+            if(pl.rowElement) {
+                pl.rowElement.querySelector('.p-played-count').innerText = pl.played;
+            }
+        });
+        if(keeper && keeper.rowElement) {
+             keeper.rowElement.querySelector('.p-played-count').innerText = numPeriods.toString();
+        }
+
+        currentPeriod = 0;
+        renderField();
+        
+        // NIEUW: Genereer de samenvatting
+        generateSummary(activePlayers, lineups);
+    }
+
+    function generateSummary(players, lineups) {
+        const list = document.getElementById('summaryList');
+        const container = document.getElementById('summaryOutput');
+        list.innerHTML = '';
+        container.style.display = 'block';
+
+        let hardIssues = [];
+        let softIssues = [];
+        let successes = [];
+
+        // 1. Analyseer Harde Eisen (Min/Max periodes, Incompatibiliteit)
+        let minPerFail = [];
+        let maxPerFail = [];
+        
+        players.forEach(p => {
+            if (p.played < p.minP) minPerFail.push(`${p.name} (${p.played}/${p.minP})`);
+            if (p.played > p.maxP) maxPerFail.push(`${p.name} (${p.played}/${p.maxP})`);
+        });
+
+        if (minPerFail.length > 0) hardIssues.push(`${minPerFail.length}x Minimale periodes niet gehaald: ${minPerFail.join(', ')}.`);
+        if (maxPerFail.length > 0) hardIssues.push(`${maxPerFail.length}x Maximale periodes overschreden: ${maxPerFail.join(', ')}.`);
+
+        // Check incompatibiliteit op het veld
+        let conflictDetails = [];
+        lineups.forEach((l, idx) => {
+            const fieldPlayers = Object.values(l.field);
+            for(let i=0; i<fieldPlayers.length; i++) {
+                for(let j=i+1; j<fieldPlayers.length; j++) {
+                    const p1 = fieldPlayers[i];
+                    const p2 = fieldPlayers[j];
+                    if (p1.incompatible && p1.incompatible.includes(p2.jerseyNumInt)) {
+                        conflictDetails.push(`P${l.period}: ${p1.name} & ${p2.name}`);
+                    }
+                }
+            }
+        });
+        if (conflictDetails.length > 0) hardIssues.push(`${conflictDetails.length}x Incompatibele spelers samen: ${conflictDetails.join(', ')}.`);
+
+        // 2. Analyseer Zachtere Eisen (Dubbele wissel, Niet plek, GW)
+        let doubleBenchDetails = [];
+        let notPosDetails = [];
+        let gwFailDetails = [];
+
+        players.forEach(p => {
+            // Check dubbele wissel
+            let benchStreak = 0;
+            let streakStart = 0;
+            for(let i=0; i<lineups.length; i++) {
+                const isBench = lineups[i].bench.some(b => b.id === p.id);
+                if(isBench) {
+                    if (benchStreak === 0) streakStart = i + 1;
+                    benchStreak++;
+                } else {
+                    if (benchStreak >= 2) {
+                         let periods = [];
+                         for(let k=0; k<benchStreak; k++) periods.push(streakStart + k);
+                         doubleBenchDetails.push(`${p.name} (P${periods.join('+')})`);
+                    }
+                    benchStreak = 0;
+                }
+            }
+            if (benchStreak >= 2) {
+                 let periods = [];
+                 for(let k=0; k<benchStreak; k++) periods.push(streakStart + k);
+                 doubleBenchDetails.push(`${p.name} (P${periods.join('+')})`);
+            }
+
+            // Check GW (Geen Wissel)
+            const halfTime = Math.floor(lineups.length / 2);
+            for(let i=0; i<lineups.length; i++) {
+                const isBench = lineups[i].bench.some(b => b.id === p.id);
+                if (isBench) {
+                    if (i < halfTime && p.gwH1) { gwFailDetails.push(`${p.name} (P${i+1})`); }
+                    if (i >= halfTime && p.gwH2) { gwFailDetails.push(`${p.name} (P${i+1})`); }
+                }
+            }
+        });
+
+        // Check 'Niet op deze plek'
+        lineups.forEach(l => {
+            Object.entries(l.field).forEach(([pos, pl]) => {
+                if (pl.notPos && pl.notPos.includes(parseInt(pos))) {
+                    const posName = positions[pos] || pos;
+                    notPosDetails.push(`P${l.period}: ${pl.name} op ${posName}`);
+                }
+            });
+        });
+
+        if (doubleBenchDetails.length > 0) softIssues.push(`${doubleBenchDetails.length}x Dubbele wisselbeurt: ${doubleBenchDetails.join(', ')}.`);
+        if (gwFailDetails.length > 0) softIssues.push(`${gwFailDetails.length}x Wissel ondanks 'Geen Wissel': ${gwFailDetails.join(', ')}.`);
+        if (notPosDetails.length > 0) softIssues.push(`${notPosDetails.length}x Speler op 'Niet plek': ${notPosDetails.join(', ')}.`);
+
+        // 3. Analyseer Successen (Voorkeuren)
+        let bestCount = 0;
+        let likeCount = 0;
+        let coachCount = 0;
+        let totalAssignments = 0;
+
+        lineups.forEach(l => {
+            Object.entries(l.field).forEach(([pos, pl]) => {
+                const pId = parseInt(pos);
+                totalAssignments++;
+                if (pl.best && pl.best.includes(pId)) bestCount++;
+                else if (pl.like && pl.like.includes(pId)) likeCount++;
+                else if (pl.coach && pl.coach.includes(pId)) coachCount++;
+            });
+        });
+
+        successes.push(`${bestCount} keer op 'Beste' positie geplaatst.`);
+        successes.push(`${likeCount} keer op 'Graag' positie geplaatst.`);
+        if (coachCount > 0) successes.push(`${coachCount} keer op 'Coach' positie geplaatst.`);
+        
+        // 4. Analyseer Speeltijd Verdeling
+        let playedCounts = {};
+        let minPlayed = 999;
+        let maxPlayed = -1;
+        let fieldPlayerCount = 0;
+
+        players.forEach(p => {
+            if (p.isKeeper) return; // Keepers buiten beschouwing laten voor deze statistiek
+            fieldPlayerCount++;
+            
+            const count = p.played;
+            if (!playedCounts[count]) playedCounts[count] = [];
+            playedCounts[count].push(p.name);
+            
+            if (count < minPlayed) minPlayed = count;
+            if (count > maxPlayed) maxPlayed = count;
+        });
+
+        if (fieldPlayerCount > 0) {
+            let distributionParts = [];
+            // Sorteer van hoog naar laag aantal periodes
+            Object.keys(playedCounts).sort((a,b) => b-a).forEach(c => {
+                distributionParts.push(`${playedCounts[c].length} spelers ${c}x`);
+            });
+            successes.push(`Speeltijd verdeling: ${distributionParts.join(', ')}.`);
+
+            if ((maxPlayed - minPlayed) >= 1) {
+                const luckyOnes = playedCounts[maxPlayed];
+                const luckyNamesStr = luckyOnes.length <= 8 ? luckyOnes.join(', ') : `${luckyOnes.length} spelers`;
+                successes.push(`Meeste speeltijd (${maxPlayed}x): ${luckyNamesStr}.`);
+
+                const unluckyOnes = playedCounts[minPlayed];
+                // Alleen namen tonen als het er niet te veel zijn, anders aantal
+                const namesStr = unluckyOnes.length <= 6 ? unluckyOnes.join(', ') : `${unluckyOnes.length} spelers`;
+                
+                softIssues.push(`Ongelijke verdeling: ${namesStr} spelen minder (${minPlayed}) dan de rest (${maxPlayed}).`);
+                
+                // Tip alleen tonen als 'Minimaal verschil speeltijd' uit staat
+                if (!document.getElementById('minPlaytimeDiff').checked) {
+                    softIssues.push(`Tip: Zet 'Minimaal Periodes' voor iedereen op ${minPlayed + 1} (of hoger) om dit gelijk te trekken.`);
+                }
+            }
+        }
+        
+        // Render HTML
+        const addLi = (text, color) => {
+            const li = document.createElement('li');
+            li.innerText = text;
+            li.style.color = color;
+            li.style.marginBottom = "4px";
+            list.appendChild(li);
+        };
+
+        if (hardIssues.length === 0 && softIssues.length === 0) {
+            addLi("Alle eisen zijn perfect vervuld!", "green");
+        } else {
+            hardIssues.forEach(t => addLi("LET OP: " + t, "#D32F2F")); // Rood
+            softIssues.forEach(t => addLi("Info: " + t, "#F57C00"));   // Oranje
+        }
+        successes.forEach(t => addLi("Goed: " + t, "#388E3C"));        // Groen
+    }
+
+    function renderField() {
+        if (lineups.length === 0) return;
+        
+        const data = lineups[currentPeriod];
+        const nextData = lineups[currentPeriod + 1]; // For bench preview
+        const totalPeriods = lineups.length;
+
+        document.getElementById('periodTitle').innerText = `Periode ${data.period}`;
+        document.getElementById('periodIndicator').innerText = ` ${data.period} / ${totalPeriods} `;
+
+        const field = document.getElementById('hockeyField');
+        // Clear old markers (keep goal/circle)
+        const markers = field.querySelectorAll('.player-marker');
+        markers.forEach(m => m.remove());
+
+        // Render Keeper
+        if (data.keeper) {
+            addMarker(field, 'K', data.keeper.name, 'Keeper', true);
+        }
+
+        // Render Field Players
+        const totalFieldPlayers = currentFormationConfig.reduce((sum, row) => sum + row.count, 0);
+        for (let pos = 1; pos <= totalFieldPlayers; pos++) {
+            const player = data.field[pos];
+            if (player) {
+                const coords = getPosCoordinates(pos, currentFormationConfig);
+                addMarker(field, pos, player.name, coords.role, false, coords);
+            }
+        }
+
+        // Render Bench
+        const benchContainer = document.getElementById('benchContainer');
+        benchContainer.innerHTML = '';
+        data.bench.forEach(pl => {
+            let nextPosText = "";
+            if (nextData) {
+                // Find where this player plays next
+                const nextPosEntry = Object.entries(nextData.field).find(([k, v]) => v.id === pl.id);
+                if (nextPosEntry) {
+                    nextPosText = `-> ${positions[nextPosEntry[0]]}`;
+                } else {
+                    nextPosText = "-> Wissel";
+                }
+            }
+
+            const div = document.createElement('div');
+            div.className = 'bench-player';
+            div.innerHTML = `<strong>${pl.name}</strong><br><span class="next-pos">${nextPosText}</span>`;
+            benchContainer.appendChild(div);
+        });
+    }
+
+    function addMarker(container, posId, name, role, isKeeper = false, coords = null) {
+        const div = document.createElement('div');
+        div.className = `player-marker ${isKeeper ? 'keeper' : ''}`;
+        
+        if (isKeeper) {
+            div.classList.add('pos-K'); // Use CSS class for keeper
+        } else if (coords) {
+            div.style.top = coords.top;
+            div.style.left = coords.left;
+        } else {
+            div.classList.add(`pos-${posId}`); // Fallback
+        }
+
+        div.innerHTML = `<div class="pos-number-badge">${posId === 'K' ? 'K' : posId}</div><div>${name}</div><div class="pos-label">${role}</div>`;
+        container.appendChild(div);
+    }
+
+    function prevPeriod() {
+        if (currentPeriod > 0) {
+            currentPeriod--;
+            renderField();
+        }
+    }
+
+    function nextPeriod() {
+        if (currentPeriod < lineups.length - 1) {
+            currentPeriod++;
+            renderField();
+        }
+    }
+
+    // Start
+    init();
+
+</script>
+
+</body>
+</html>
