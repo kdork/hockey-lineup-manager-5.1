@@ -35,10 +35,12 @@
             left: 140px;
             z-index: 10;
             background-color: white;
-            width: 60px;
-            min-width: 60px;
+            width: 40px; /* Aangepast: smaller gemaakt (was 60px) */
+            min-width: 40px;
             box-sizing: border-box;
             border-right: 2px solid #999;
+            padding: 4px; /* Aangepast: minder padding */
+            font-size: 13px;
         }
         th.col-fixed-name, th.col-fixed-jersey {
             z-index: 20;
@@ -197,6 +199,20 @@
                 <label><input type="checkbox" id="minPlaytimeDiff" checked> Minimaal verschil speeltijd</label>
             </div>
 
+            <!-- AANGEPASTE RIJ: Alleen nog Max 2 posities -->
+            <div style="width: 100%; display: flex; gap: 15px; align-items: center; flex-wrap: wrap; margin-bottom: 5px;">
+                <strong>Positiebehoud:</strong>
+                <label>Max 2 posities (0-8): 
+                    <select id="weightSamePosMatch" class="weight-input" style="width: 45px;">
+                        <option value="0" selected>0</option>
+                        <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                        <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                        <option value="7">7</option><option value="8">8</option>
+                    </select>
+                </label>
+                <span style="font-size: 11px; color: #666;">(Voorkomt 3e unieke plek)</span>
+            </div>
+
             <div style="width: 100%; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
                 <label>Periodes: 
                     <select id="numPeriods" class="weight-input" style="width: 55px;">
@@ -240,9 +256,9 @@
                 <thead>
                     <tr>
                         <th class="col-fixed-name">Naam</th>
-                        <th class="col-fixed-jersey">Rugnr</th>
-                        <th>Aanw</th>
-                        <th>Keeper?</th>
+                        <th class="col-fixed-jersey">Rug<br>nr</th> <!-- Aangepast: Rug nr op 2 regels -->
+                        <th style="width: 40px; padding: 4px; font-size: 13px;">Aanw</th> <!-- Aangepast: smaller -->
+                        <th style="width: 50px; padding: 4px; font-size: 13px;">Keeper</th> <!-- Aangepast: ? weg en smaller -->
                         <th>Speelt (x)</th>
                         <th>Minimaal<br>Periodes</th>
                         <th>Maximaal<br>Periodes</th>
@@ -253,7 +269,7 @@
                         <th style="min-width: 90px;">Beste<br>(Posities)</th>
                         <th style="min-width: 90px;">Graag<br>(Posities)</th>
                         <th style="min-width: 90px;">Coach<br>(Posities)</th>
-                        <th>Strategisch</th>
+                        <th>Strategisch<br>(met wie)</th>
                         <th>Niet plek</th>
                     </tr>
                 </thead>
@@ -277,7 +293,26 @@
 
     <!-- Field Panel -->
     <div class="panel" style="flex: 0 0 420px; text-align: center; max-width: 100%;">
-        <h2 id="periodTitle">Periode 1</h2>
+        
+        <!-- NIEUW: Header met refresh knop -->
+        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px;">
+            <button onclick="calculateLineups()" title="Opnieuw berekenen" style="
+                width: 30px; 
+                height: 30px; 
+                border-radius: 50%; 
+                border: 1px solid #ccc; 
+                background: white; 
+                font-size: 20px; 
+                cursor: pointer; 
+                display: flex; 
+                align-items: center; 
+                justify-content: center; 
+                color: #555;
+                padding: 0;
+            ">&#x21bb;</button>
+            <h2 id="periodTitle" style="margin: 0;">Periode 1</h2>
+        </div>
+
         <div class="field-container" id="hockeyField">
             <div class="goal"></div>
             <div class="circle"></div>
@@ -354,8 +389,13 @@
         if (tbody.children.length > 0) return;
 
         defaultNames.forEach((name, index) => {
-            addPlayerRow(name);
+            // Aangepast: Eerste speler standaard als keeper instellen
+            const data = index === 0 ? { keeper: true } : {};
+            addPlayerRow(name, data);
         });
+
+        // Aangepast: Meteen berekenen zodat er direct een voorbeeld zichtbaar is
+        calculateLineups();
     }
 
     // Helper function to create a row (used by init and import)
@@ -369,25 +409,34 @@
         
         // Helper to safely get value
         const val = (key, def = "") => data[key] !== undefined ? data[key] : def;
-        const chk = (key) => data[key] === true || data[key] === "TRUE" || data[key] === true ? "checked" : "";
+        const chk = (key) => data[key] === true || data[key] === "TRUE" ? "checked" : "";
 
         // Default active is true unless specified otherwise
         const activeChecked = data.active !== undefined ? (data.active ? "checked" : "") : "checked";
 
         // Helper voor dropdown opties (scrollwheel op mobiel)
         const createOpts = (max, selected, start = 0) => {
-            let opts = `<option value="" ${selected === "" || selected === undefined ? "selected" : ""}></option>`;
+            // Check of de waarde leeg is (undefined, null of lege string)
+            const isSelectedEmpty = selected === "" || selected === undefined || selected === null;
+            
+            // De lege optie is geselecteerd als er geen waarde is
+            let opts = `<option value="" ${isSelectedEmpty ? "selected" : ""}></option>`;
+            
             for(let i=start; i<=max; i++) {
-                opts += `<option value="${i}" ${selected == i ? "selected" : ""}>${i}</option>`;
+                // Check of deze optie geselecteerd moet zijn
+                // We gebruiken == voor losse vergelijking (zodat "1" == 1 werkt)
+                // Maar we zorgen dat we niet vergelijken als selected leeg is (want "" == 0 is true in JS)
+                const isMatch = !isSelectedEmpty && (selected == i);
+                opts += `<option value="${i}" ${isMatch ? "selected" : ""}>${i}</option>`;
             }
             return opts;
         };
 
         tr.innerHTML = `
             <td class="col-fixed-name"><input type="text" value="${name}" class="p-name" style="min-width: 110px;"></td>
-            <td class="col-fixed-jersey"><input type="text" value="${jerseyNum}" class="p-jersey" style="width: 40px;"></td>
-            <td><input type="checkbox" class="p-active" ${activeChecked}></td>
-            <td><input type="checkbox" class="p-keeper" ${chk('keeper')}></td>
+            <td class="col-fixed-jersey"><input type="text" value="${jerseyNum}" class="p-jersey" style="width: 100%; text-align: center; padding: 2px;"></td>
+            <td style="padding: 4px;"><input type="checkbox" class="p-active" ${activeChecked}></td>
+            <td style="padding: 4px;"><input type="checkbox" class="p-keeper" ${chk('keeper')}></td>
             <td><span class="p-played-count" style="font-weight:bold; color:blue;">-</span></td>
             <td><select class="p-min-periods" style="width: 50px;">${createOpts(30, val('minP'), 0)}</select></td>
             <td><select class="p-max-periods" style="width: 50px;">${createOpts(30, val('maxP'), 0)}</select></td>
@@ -491,6 +540,8 @@
             "WegingCoach": document.getElementById('w3').value,
             "GeenDubbeleWissel": document.getElementById('avoidDoubleBench').checked,
             "MinimaalVerschilSpeeltijd": document.getElementById('minPlaytimeDiff').checked,
+            // OUDE SETTING VERWIJDERD
+            "WegingPositieBehoudWedstrijd": document.getElementById('weightSamePosMatch').value,
             "AantalPeriodes": document.getElementById('numPeriods').value,
             "Opstelling1": document.getElementById('form1').value,
             "Opstelling2": document.getElementById('form2').value,
@@ -556,6 +607,8 @@
                     if(s["WegingCoach"]) document.getElementById('w3').value = s["WegingCoach"];
                     if(s["GeenDubbeleWissel"] !== undefined) document.getElementById('avoidDoubleBench').checked = s["GeenDubbeleWissel"];
                     if(s["MinimaalVerschilSpeeltijd"] !== undefined) document.getElementById('minPlaytimeDiff').checked = s["MinimaalVerschilSpeeltijd"];
+                    // OUDE SETTING VERWIJDERD
+                    if(s["WegingPositieBehoudWedstrijd"] !== undefined) document.getElementById('weightSamePosMatch').value = s["WegingPositieBehoudWedstrijd"];
                     if(s["AantalPeriodes"]) document.getElementById('numPeriods').value = s["AantalPeriodes"];
                     if(s["Opstelling1"] !== undefined) document.getElementById('form1').value = s["Opstelling1"];
                     if(s["Opstelling2"] !== undefined) document.getElementById('form2').value = s["Opstelling2"];
@@ -870,6 +923,14 @@
         const w3 = parseFloat(document.getElementById('w3').value) || 1;
         const avoidDoubleBench = document.getElementById('avoidDoubleBench').checked;
         const minPlaytimeDiff = document.getElementById('minPlaytimeDiff').checked;
+        
+        // NIEUWE VARIABELEN
+        const wSameMatch = parseInt(document.getElementById('weightSamePosMatch').value) || 0;
+
+        // AANGEPASTE SCHAAL (0-8):
+        // Dit wordt nu gebruikt als STRAF (Penalty) als iemand een 3e positie dreigt te krijgen.
+        const retentionBonusScale = [0, 5, 10, 20, 40, 80, 150, 300, 600];
+
         const numPeriods = parseInt(document.getElementById('numPeriods').value) || 6;
 
         // Determine formation
@@ -967,39 +1028,40 @@
 
             // Sortering voor selectie van veldspelers
             activePlayers.sort((a, b) => {
-                // STAP 0: Check Max Periods (Harde limiet - mag niet meer spelen)
+                // STAP 1: Check Max Periods (Harde limiet - mag niet meer spelen)
+                // Dit is absoluut leidend.
                 const aDone = a.played >= a.maxP;
                 const bDone = b.played >= b.maxP;
 
-                if (aDone && !bDone) return 1; // A naar onder
-                if (!aDone && bDone) return -1; // B naar onder
+                if (aDone && !bDone) return 1; // A naar onder (bench)
+                if (!aDone && bDone) return -1; // B naar onder (bench)
                 if (aDone && bDone) return 0;
 
-                // NIEUW: Als Minimaal Verschil Speeltijd AAN staat, is aantal gespeelde periodes leidend.
-                // Dit verplaatsen we naar boven, VOOR 'Geen Wissel' en 'Min Periods Urgency'.
-                // Hierdoor wordt eerlijke verdeling de hoogste prioriteit (na max periods).
+                // STAP 2: Check Min Periods Urgency (MOET nu spelen om target te halen)
+                // Dit is ook leidend, ongeacht de "Minimaal verschil" instelling.
+                // Als je nog 2 periodes moet spelen en er zijn er nog maar 2 over, MOET je spelen.
+                const aMustPlay = (a.minP - a.played) >= remainingPeriods;
+                const bMustPlay = (b.minP - b.played) >= remainingPeriods;
+                
+                if (aMustPlay && !bMustPlay) return -1; // A voorrang
+                if (!aMustPlay && bMustPlay) return 1;  // B voorrang
+
+                // STAP 3: Minimaal Verschil Speeltijd (Balanceren)
+                // Dit passen we alleen toe als er geen harde 'Must Play' eis is (of als beide moeten).
+                // Hier proberen we de verschillen klein te houden binnen de grenzen van min/max.
                 if (minPlaytimeDiff) {
                     if (a.played !== b.played) return a.played - b.played;
                 }
 
-                // STAP 0.5: Check Min Periods Urgency (MOET nu spelen om target te halen)
-                // Alleen relevant als we niet al op speeltijd sorteren (want dan regelt dat het wel)
-                if (!minPlaytimeDiff) {
-                    const aMustPlay = (a.minP - a.played) >= remainingPeriods;
-                    const bMustPlay = (b.minP - b.played) >= remainingPeriods;
-                    
-                    if (aMustPlay && !bMustPlay) return -1; // A voorrang
-                    if (!aMustPlay && bMustPlay) return 1;
-                }
-
-                // STAP 1: Check "Geen Wissel" (GW) status
+                // STAP 4: Check "Geen Wissel" (GW) status
+                // Als we niet aan het balanceren zijn (of standen zijn gelijk), kijken we naar wisselvoorkeur.
                 const aNoSub = isHalf1 ? a.gwH1 : a.gwH2;
                 const bNoSub = isHalf1 ? b.gwH1 : b.gwH2;
 
                 if (aNoSub && !bNoSub) return -1;
                 if (!aNoSub && bNoSub) return 1;
 
-                // STAP 1.5: Check Avoid Double Bench
+                // STAP 5: Check Avoid Double Bench
                 if (avoidDoubleBench && p > 0) {
                     const aWasBench = prevBenchIds.includes(a.id);
                     const bWasBench = prevBenchIds.includes(b.id);
@@ -1008,15 +1070,14 @@
                     if (!aWasBench && bWasBench) return 1;
                 }
 
-                // STAP 2: Check Min Periods (Heeft nog minuten nodig, maar niet urgent)
-                // Alleen als Minimaal Verschil Speeltijd uit staat
-                if (!minPlaytimeDiff) {
-                    const aRem = Math.max(0, a.minP - a.played);
-                    const bRem = Math.max(0, b.minP - b.played);
-                    if (aRem !== bRem) return bRem - aRem; // Degene die nog het meeste moet, krijgt voorrang
-                }
+                // STAP 6: Soft Min Periods (Heeft nog minuten nodig, maar niet urgent)
+                // Als Minimaal Verschil Speeltijd uit staat, of als alles gelijk is,
+                // geef voorrang aan degene die nog het verst van zijn minimum af zit.
+                const aRem = Math.max(0, a.minP - a.played);
+                const bRem = Math.max(0, b.minP - b.played);
+                if (aRem !== bRem) return bRem - aRem; // Degene die nog het meeste moet, krijgt voorrang
 
-                // STAP 3: Normale rotatie
+                // STAP 7: Normale rotatie (als fallback)
                 if (a.played !== b.played) return a.played - b.played;
                 
                 return 0.5 - Math.random();
@@ -1046,10 +1107,10 @@
                         if (conflict) {
                             // Try to swap p2 with a bench player
                             const p2Fixed = isHalf1 ? p2.gwH1 : p2.gwH2;
-                            // Check urgency for p2: Als ze MOETEN spelen, mag je ze niet wisselen voor een conflict
-                            // Als minPlaytimeDiff aan staat, negeren we minP urgency (want we balanceren puur op aantal),
-                            // maar we moeten wel zorgen dat we niet wisselen met iemand die al meer gespeeld heeft.
-                            const p2MustPlay = !minPlaytimeDiff && ((p2.minP - p2.played) >= remainingPeriods);
+                            
+                            // Check urgency for p2: Als ze MOETEN spelen, mag je ze niet wisselen voor een conflict.
+                            // Dit is nu een harde eis, ongeacht minPlaytimeDiff.
+                            const p2MustPlay = (p2.minP - p2.played) >= remainingPeriods;
                             
                             if (!p2Fixed && !p2MustPlay) {
                                 const swapIdx = benchPlayers.findIndex(b => {
@@ -1058,8 +1119,8 @@
                                     // Check if b is allowed to play
                                     const bDone = b.played >= b.maxP;
                                     
-                                    // NIEUW: Als Minimaal Verschil Speeltijd aan staat, mag de wisselspeler niet meer gespeeld hebben dan de speler op het veld.
-                                    // Anders vergroten we het gat in speeltijd.
+                                    // Als Minimaal Verschil Speeltijd aan staat, mag de wisselspeler niet meer gespeeld hebben dan de speler op het veld.
+                                    // Tenzij de speler op het veld al zijn max heeft bereikt (maar dat wordt hierboven al afgevangen).
                                     let playtimeCheck = true;
                                     if (minPlaytimeDiff) {
                                         if (b.played > p2.played) playtimeCheck = false;
@@ -1141,6 +1202,30 @@
 
                         let score = getScore(pl.id, pos, pl.best, pl.like, pl.coach, w1, w2, w3);
                         
+                        // NIEUW: Strafpunten als dit de 3e (of 4e..) unieke positie wordt
+                        if (wSameMatch > 0) {
+                            // 1. Verzamel historie tot nu toe
+                            const playedPosSoFar = new Set();
+                            for (let k = 0; k < p; k++) {
+                                const prevLineup = lineups[k];
+                                // Zoek waar deze speler stond in periode k
+                                for(const [prevPos, prevPl] of Object.entries(prevLineup.field)) {
+                                    if(prevPl.id === pl.id) {
+                                        playedPosSoFar.add(parseInt(prevPos));
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // 2. Check of we al aan de limiet van 2 zitten
+                            if (playedPosSoFar.size >= 2) {
+                                // Als de huidige 'pos' NIET in de historie zit, is dit een 3e unieke plek.
+                                if (!playedPosSoFar.has(pos)) {
+                                    score -= retentionBonusScale[wSameMatch];
+                                }
+                            }
+                        }
+
                         // --- STRATEGIC & INCOMPATIBLE LOGIC ---
                         for (const [assignedPos, assignedPl] of Object.entries(fieldSetup)) {
                             const assignedPosInt = parseInt(assignedPos);
@@ -1314,6 +1399,54 @@
         if (gwFailDetails.length > 0) softIssues.push(`${gwFailDetails.length}x Wissel ondanks 'Geen Wissel': ${gwFailDetails.join(', ')}.`);
         if (notPosDetails.length > 0) softIssues.push(`${notPosDetails.length}x Speler op 'Niet plek': ${notPosDetails.join(', ')}.`);
 
+        // NIEUW: Analyseer Positiebehoud (Wisselen van plek)
+        const wSameMatch = parseInt(document.getElementById('weightSamePosMatch').value) || 0;
+
+        // We berekenen nu altijd de historie om 'Zwervers' te detecteren
+        let posHistory = {}; // { playerId: { h1: Set, h2: Set, total: Set } }
+        const halfTime = Math.floor(lineups.length / 2);
+
+        // Init history
+        players.forEach(p => {
+            posHistory[p.id] = { h1: new Set(), h2: new Set(), total: new Set(), name: p.name };
+        });
+
+        // Vul history
+        lineups.forEach((l, idx) => {
+            const isH1 = idx < halfTime;
+            Object.entries(l.field).forEach(([pos, pl]) => {
+                if(posHistory[pl.id]) {
+                    if(isH1) posHistory[pl.id].h1.add(pos);
+                    else posHistory[pl.id].h2.add(pos);
+                    posHistory[pl.id].total.add(pos);
+                }
+            });
+        });
+
+        // 1. Rapporteer Zwervers (> 2 posities totaal)
+        let roamers = [];
+        Object.values(posHistory).forEach(h => {
+            if (h.total.size > 2) {
+                roamers.push(`${h.name} (${h.total.size} posities)`);
+            }
+        });
+        if (roamers.length > 0) {
+            softIssues.push(`${roamers.length}x Zwervers (>2 posities): ${roamers.join(', ')}.`);
+        }
+
+        // 2. Analyseer Triggers (als ze aan staan)
+        // OUDE H1/H2 LOGICA VERWIJDERD
+
+        if (wSameMatch > 0) {
+            let roamers = [];
+            Object.values(posHistory).forEach(h => {
+                if (h.total.size > 2) {
+                    roamers.push(h.name);
+                }
+            });
+            if (roamers.length > 0) softIssues.push(`Max 2 posities niet gelukt voor: ${roamers.join(', ')}.`);
+        }
+
         // 3. Analyseer Successen (Voorkeuren)
         let bestCount = 0;
         let likeCount = 0;
@@ -1461,11 +1594,11 @@
             div.classList.add(`pos-${posId}`); // Fallback
         }
 
-        div.innerHTML = `<div class="pos-number-badge">${posId === 'K' ? 'K' : posId}</div><div>${name}</div><div class="pos-label">${role}</div>`;
-        container.appendChild(div);
-    }
+    div.innerHTML = `<div class="pos-number-badge">${posId === 'K' ? 'K' : posId}</div><div>${name}</div><div class="pos-label">${role}</div>`;
+    container.appendChild(div);
+}
 
-    function prevPeriod() {
+function prevPeriod() {
         if (currentPeriod > 0) {
             currentPeriod--;
             renderField();
